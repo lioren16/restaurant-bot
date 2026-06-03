@@ -168,7 +168,7 @@ async def admin(msg: Message):
 async def back(msg: Message):
     await msg.answer("Главное меню", reply_markup=main_kb())
 
-# ---------------- ADD DISH ----------------
+# ---------------- ADD DISH (FIXED FSM WITHOUT CONFLICTS) ----------------
 @dp.message(F.text == "➕ Добавить блюдо")
 async def add_start(msg: Message):
     if msg.from_user.id != ADMIN_ID:
@@ -192,35 +192,25 @@ async def add_photo(msg: Message):
     await msg.answer("Теперь отправь название блюда")
 
 
-@dp.message()
-async def add_text(msg: Message):
-    if msg.from_user.id != ADMIN_ID:
+# ⚠️ ВАЖНО: УБРАЛИ ГЛОБАЛЬНЫЙ ПЕРЕХВАТ
+@dp.message(F.from_user.id == ADMIN_ID)
+async def admin_input_router(msg: Message):
+    uid = msg.from_user.id
+
+    if uid not in add_state:
         return
 
-    if msg.from_user.id not in add_state:
-        return
-
+    state = add_state[uid]
     text = (msg.text or "").strip()
-    state = add_state[msg.from_user.id]
 
-    # игнор кнопок (ВАЖНО)
-    blocked = [
-        "👤 Админка",
-        "📦 Заказы",
-        "⬅ Назад",
-        "➕ Добавить блюдо",
-        "🍽 Меню",
-        "🛒 Корзина",
-        "📦 Оформить заказ"
-    ]
-
+    blocked = ["👤 Админка", "📦 Заказы", "⬅ Назад", "➕ Добавить блюдо"]
     if text in blocked:
         return
 
     if state["step"] == "name":
         state["name"] = text
         state["step"] = "category"
-        await msg.answer("Теперь отправь категорию")
+        await msg.answer("Отправь категорию")
         return
 
     if state["step"] == "category":
@@ -230,7 +220,7 @@ async def add_text(msg: Message):
         )
         conn.commit()
 
-        add_state.pop(msg.from_user.id, None)
+        add_state.pop(uid, None)
 
         await msg.answer("Добавлено ✅")
 
