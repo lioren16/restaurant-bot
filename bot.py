@@ -1,10 +1,11 @@
 import sqlite3
 import asyncio
+import os
+
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
-import os
 
 TOKEN = os.getenv("BOT_TOKEN")
 
@@ -35,11 +36,9 @@ CREATE TABLE IF NOT EXISTS orders (
 
 conn.commit()
 
-
-# ---------------- ADMIN ----------------
 ADMIN_ID = 1767504481
 
-
+# ---------------- KEYBOARDS ----------------
 def main_menu():
     kb = ReplyKeyboardBuilder()
     kb.button(text="🍽 Меню")
@@ -70,12 +69,17 @@ async def menu(msg: Message):
     cur.execute("SELECT DISTINCT category FROM dishes")
     cats = cur.fetchall()
 
+    if not cats:
+        return await msg.answer("Категорий пока нет")
+
     kb = InlineKeyboardBuilder()
+
     for c in cats:
         kb.button(text=c[0], callback_data=f"cat_{c[0]}")
+
     kb.adjust(2)
 
-    await msg.answer("Выберите категорию:", reply_markup=kb.as_markup())
+    await msg.answer("Выберите категорию 👇", reply_markup=kb.as_markup())
 
 
 @dp.callback_query(F.data.startswith("cat_"))
@@ -86,37 +90,53 @@ async def show_cat(call: CallbackQuery):
     items = cur.fetchall()
 
     if not items:
-        await call.message.answer("Пусто")
-        return
+        return await call.message.answer("В этой категории пока пусто")
 
     for name, photo in items:
         await call.message.answer_photo(photo, caption=name)
 
 
-# ---------------- ORDER ----------------
+# ---------------- ORDER SYSTEM ----------------
+ORDER_STATE = {}
+
+
 @dp.message(F.text == "🛒 Оформить заказ")
-async def order(msg: Message):
-    await msg.answer("Напиши, что хочешь заказать (через запятую)")
+async def start_order(msg: Message):
+    ORDER_STATE[msg.from_user.id] = True
+    await msg.answer("Напиши, что хочешь заказать 🧾")
+
 
 @dp.message()
 async def save_order(msg: Message):
-    if msg.text.startswith("/"):
+    text = (msg.text or "").lower()
+
+    # игнор кнопок меню
+    if text in ["🍽 меню", "🛒 оформить заказ", "👤 админка", "⬅ назад", "➕ добавить блюдо", "📦 заказы"]:
         return
+
+    if text.startswith("/"):
+        return
+
+    # если пользователь не в режиме заказа
+    if not ORDER_STATE.get(msg.from_user.id):
+        return
+
+    ORDER_STATE[msg.from_user.id] = False
 
     cur.execute(
         "INSERT INTO orders (user_id, username, items) VALUES (?, ?, ?)",
-        (msg.from_user.id, msg.from_user.username, msg.text)
+        (msg.from_user.id, msg.from_user.username or "no_username", msg.text)
     )
     conn.commit()
 
     await msg.answer("Заказ принят ✅")
 
 
-# ---------------- ADMIN PANEL ----------------
+# ---------------- ADMIN ----------------
 @dp.message(F.text == "👤 Админка")
 async def admin(msg: Message):
     if msg.from_user.id != ADMIN_ID:
-        return await msg.answer("Нет доступа")
+        return
 
     await msg.answer("Админ панель:", reply_markup=admin_menu())
 
@@ -126,8 +146,9 @@ async def back(msg: Message):
     await msg.answer("Главное меню", reply_markup=main_menu())
 
 
-# ---------------- ADD DISH (photo via Telegram) ----------------
+# ---------------- ADD DISH ----------------
 add_state = {}
+
 
 @dp.message(F.text == "➕ Добавить блюдо")
 async def add_start(msg: Message):
@@ -188,7 +209,7 @@ async def get_category(msg: Message):
     await msg.answer("Блюдо добавлено ✅")
 
 
-# ---------------- ORDERS ADMIN ----------------
+# ---------------- ORDERS VIEW ----------------
 @dp.message(F.text == "📦 Заказы")
 async def orders(msg: Message):
     if msg.from_user.id != ADMIN_ID:
@@ -203,7 +224,7 @@ async def orders(msg: Message):
     text = "📦 Последние заказы:\n\n"
 
     for uid, username, items in data:
-        text += f"👤 {username or uid}\n🧾 {items}\n\n"
+        text += f"👤 {username}\n🧾 {items}\n\n"
 
     await msg.answer(text)
 
